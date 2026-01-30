@@ -317,7 +317,7 @@ When scheduling events, ALWAYS use the current year ({current_year}) or future d
 - Include citations [chunk_id] when referencing knowledge base information
 - For scheduling: Check context for default durations (e.g., "standard consultation = 30 minutes")
 - Be concise, professional, and helpful
-- Corporate email for sending: {settings.google_calendar_email}"""
+- When sending emails, they will be sent from the authenticated user's account"""
 
         # Build messages list starting with system prompt
         messages = [{"role": "system", "content": system_prompt}]

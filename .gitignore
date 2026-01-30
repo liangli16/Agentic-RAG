@@ -12,6 +12,8 @@ __pycache__/
 # Google API credentials (NEVER commit these!)
 credentials/*.json
 credentials/service_account.json
+credentials/oauth_credentials.json
+credentials/token.json
 
 # IDE specific files
 .idea/

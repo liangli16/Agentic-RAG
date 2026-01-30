@@ -9,8 +9,7 @@ This tool allows the agent to create calendar events with:
 - Timezone support
 - RAG-informed durations (e.g., "standard consultation = 30 min")
 
-Uses Google Calendar API with service account authentication and
-domain-wide delegation to create events on behalf of users.
+Uses Google Calendar API with OAuth 2.0 authentication for personal accounts.
 """
 
 import logging
@@ -25,16 +24,15 @@ class CalendarTool(BaseTool):
     """
     Tool for creating Google Calendar events.
     
-    Uses Google Calendar API with service account credentials.
-    The service account must have domain-wide delegation enabled
-    to create events on behalf of the configured email address.
+    Uses Google Calendar API with OAuth 2.0 authentication.
+    Works with personal Gmail accounts - no Google Workspace required.
     
     Required setup:
     1. Create a Google Cloud project
     2. Enable Google Calendar API
-    3. Create a service account with domain-wide delegation
-    4. Download the service account JSON key
-    5. Grant the service account Calendar access in Google Workspace Admin
+    3. Create OAuth 2.0 credentials (Desktop app)
+    4. Download the OAuth credentials JSON
+    5. Authorize the app on first use (browser opens automatically)
     """
     
     def __init__(self):
@@ -65,40 +63,29 @@ class CalendarTool(BaseTool):
         if not self._initialized:
             try:
                 # Import here to avoid issues if google packages not installed
-                from google.oauth2 import service_account
                 from googleapiclient.discovery import build
                 
-                # Import settings lazily to avoid circular imports
-                from ...config.settings import get_settings
-                settings = get_settings()
+                # Import OAuth manager
+                from ...config.oauth_manager import get_oauth_manager
                 
-                # Load service account credentials
-                credentials = service_account.Credentials.from_service_account_file(
-                    settings.google_service_account_path,
-                    scopes=['https://www.googleapis.com/auth/calendar']
-                )
-                
-                # Delegate to the corporate email for domain-wide delegation
-                delegated_credentials = credentials.with_subject(
-                    settings.google_calendar_email
-                )
+                # Get OAuth credentials (may trigger browser auth on first run)
+                oauth_manager = get_oauth_manager()
+                credentials = oauth_manager.get_credentials()
                 
                 # Build the Calendar service
                 self._service = build(
                     'calendar', 
                     'v3', 
-                    credentials=delegated_credentials
+                    credentials=credentials
                 )
                 self._initialized = True
-                logger.info(
-                    f"Google Calendar service initialized for "
-                    f"{settings.google_calendar_email}"
-                )
+                logger.info("Google Calendar service initialized with OAuth 2.0")
                 
             except FileNotFoundError as e:
                 logger.error(
-                    f"Service account file not found: {e}. "
-                    "Please ensure credentials/service_account.json exists."
+                    f"OAuth credentials file not found: {e}. "
+                    "Please ensure credentials/oauth_credentials.json exists. "
+                    "Download from Google Cloud Console > APIs & Services > Credentials."
                 )
                 raise
             except Exception as e:
@@ -158,7 +145,7 @@ class CalendarTool(BaseTool):
             # Build event body with Google Meet conferencing
             event = {
                 'summary': summary,
-                'description': description or f'Scheduled via Agentic RAG Assistant\nOrganizer: {settings.google_calendar_email}',
+                'description': description or 'Scheduled via Agentic RAG Assistant',
                 'start': {
                     'dateTime': start_datetime,
                     'timeZone': timezone,
@@ -178,27 +165,15 @@ class CalendarTool(BaseTool):
                 },
             }
             
-            # Build attendees list - always include organizer
-            attendee_list = [
-                {
-                    'email': settings.google_calendar_email,
-                    'organizer': True,
-                    'responseStatus': 'accepted'
-                }
-            ]
-            
             # Add other attendees if provided
             if attendees:
-                for email in attendees:
-                    # Don't add organizer twice
-                    if email.lower() != settings.google_calendar_email.lower():
-                        attendee_list.append({'email': email})
-            
-            event['attendees'] = attendee_list
+                attendee_list = [{'email': email} for email in attendees]
+                event['attendees'] = attendee_list
             
             # Create the event with conference data support
+            # Use 'primary' calendar for OAuth (user's main calendar)
             created_event = service.events().insert(
-                calendarId=settings.google_calendar_id,
+                calendarId='primary',
                 body=event,
                 conferenceDataVersion=1,  # Required to create Meet link
                 sendUpdates='all'  # Send email invitations to all attendees
@@ -214,6 +189,9 @@ class CalendarTool(BaseTool):
                         meet_link = ep.get('uri')
                         break
             
+            # Get organizer email from created event
+            organizer_email = created_event.get('organizer', {}).get('email', 'me')
+            
             logger.info(
                 f"Calendar event created successfully: "
                 f"ID={created_event.get('id')}, Summary='{summary}', "
@@ -225,7 +203,7 @@ class CalendarTool(BaseTool):
                 "event_link": created_event.get('htmlLink'),
                 "meet_link": meet_link,
                 "summary": created_event.get('summary'),
-                "organizer": settings.google_calendar_email,
+                "organizer": organizer_email,
                 "start": created_event.get('start'),
                 "end": created_event.get('end'),
                 "attendees": [

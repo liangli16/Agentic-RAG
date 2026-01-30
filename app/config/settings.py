@@ -7,7 +7,7 @@ Application Settings - Environment Variable Management.
 Loads and validates all configuration from environment variables:
 - Supabase credentials for vector database
 - OpenAI/Anthropic API keys for LLM
-- Google service account for calendar/email tools
+- Google OAuth 2.0 credentials for calendar/email tools
 - Application settings (log level, environment, etc.)
 
 Uses Pydantic Settings for automatic .env file loading and validation.
@@ -28,7 +28,7 @@ class Settings(BaseSettings):
     
     Optional environment variables:
     - ANTHROPIC_API_KEY (for Claude support)
-    - GOOGLE_SERVICE_ACCOUNT_PATH, GOOGLE_CALENDAR_EMAIL (for tools)
+    - GOOGLE_OAUTH_CREDENTIALS_PATH, GOOGLE_TOKEN_PATH (for tools)
     """
     
     # =========================================================================
@@ -67,23 +67,32 @@ class Settings(BaseSettings):
     # =========================================================================
     # Google API Configuration (for Agentic Tools)
     # =========================================================================
-    # Path to Google service account JSON file
-    google_service_account_path: str = Field(
-        default="credentials/service_account.json",
-        env="GOOGLE_SERVICE_ACCOUNT_PATH"
+    # OAuth 2.0 credentials for personal Google accounts
+    google_oauth_credentials_path: str = Field(
+        default="credentials/oauth_credentials.json",
+        env="GOOGLE_OAUTH_CREDENTIALS_PATH"
     )
     
-    # Email address for Google Calendar and Gmail (domain-wide delegation)
-    # This is the email that will create calendar events and send emails
-    google_calendar_email: str = Field(
-        default="",
-        env="GOOGLE_CALENDAR_EMAIL"
+    # Path where OAuth tokens will be stored after authorization
+    google_token_path: str = Field(
+        default="credentials/token.json",
+        env="GOOGLE_TOKEN_PATH"
     )
     
-    # Calendar ID to create events on (use 'primary' for main calendar)
+    # Calendar ID to create events on (always 'primary' for OAuth)
     google_calendar_id: str = Field(
         default="primary",
         env="GOOGLE_CALENDAR_ID"
+    )
+    
+    # Legacy service account fields (deprecated - OAuth is now recommended)
+    google_service_account_path: str = Field(
+        default="",
+        env="GOOGLE_SERVICE_ACCOUNT_PATH"
+    )
+    google_calendar_email: str = Field(
+        default="",
+        env="GOOGLE_CALENDAR_EMAIL"
     )
     
     # =========================================================================

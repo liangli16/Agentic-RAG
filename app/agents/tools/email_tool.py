@@ -6,10 +6,9 @@ Email Tool - Send Emails via Gmail API.
 This tool allows the agent to send emails with:
 - Plain text body
 - Custom subject lines
-- Sent from the configured corporate email
+- Sent from the authenticated user's email
 
-Uses Gmail API with service account authentication and
-domain-wide delegation to send emails on behalf of users.
+Uses Gmail API with OAuth 2.0 authentication for personal accounts.
 """
 
 import logging
@@ -27,17 +26,15 @@ class EmailTool(BaseTool):
     """
     Tool for sending emails via Gmail API.
     
-    Uses Gmail API with service account credentials.
-    The service account must have domain-wide delegation enabled
-    to send emails on behalf of the configured email address.
+    Uses Gmail API with OAuth 2.0 authentication.
+    Works with personal Gmail accounts - no Google Workspace required.
     
     Required setup:
     1. Create a Google Cloud project
     2. Enable Gmail API
-    3. Create a service account with domain-wide delegation
-    4. Download the service account JSON key
-    5. Grant the service account Gmail send access in Google Workspace Admin
-       (scope: https://www.googleapis.com/auth/gmail.send)
+    3. Create OAuth 2.0 credentials (Desktop app)
+    4. Download the OAuth credentials JSON
+    5. Authorize the app on first use (browser opens automatically)
     """
     
     def __init__(self):
@@ -68,40 +65,29 @@ class EmailTool(BaseTool):
         if not self._initialized:
             try:
                 # Import here to avoid issues if google packages not installed
-                from google.oauth2 import service_account
                 from googleapiclient.discovery import build
                 
-                # Import settings lazily to avoid circular imports
-                from ...config.settings import get_settings
-                settings = get_settings()
+                # Import OAuth manager
+                from ...config.oauth_manager import get_oauth_manager
                 
-                # Load service account credentials
-                credentials = service_account.Credentials.from_service_account_file(
-                    settings.google_service_account_path,
-                    scopes=['https://www.googleapis.com/auth/gmail.send']
-                )
-                
-                # Delegate to the corporate email for domain-wide delegation
-                delegated_credentials = credentials.with_subject(
-                    settings.google_calendar_email  # Same email for both services
-                )
+                # Get OAuth credentials (may trigger browser auth on first run)
+                oauth_manager = get_oauth_manager()
+                credentials = oauth_manager.get_credentials()
                 
                 # Build the Gmail service
                 self._service = build(
                     'gmail', 
                     'v1', 
-                    credentials=delegated_credentials
+                    credentials=credentials
                 )
                 self._initialized = True
-                logger.info(
-                    f"Gmail service initialized for "
-                    f"{settings.google_calendar_email}"
-                )
+                logger.info("Gmail service initialized with OAuth 2.0")
                 
             except FileNotFoundError as e:
                 logger.error(
-                    f"Service account file not found: {e}. "
-                    "Please ensure credentials/service_account.json exists."
+                    f"OAuth credentials file not found: {e}. "
+                    "Please ensure credentials/oauth_credentials.json exists. "
+                    "Download from Google Cloud Console > APIs & Services > Credentials."
                 )
                 raise
             except Exception as e:
@@ -143,15 +129,12 @@ class EmailTool(BaseTool):
         try:
             # Import here to handle case where google packages not installed
             from googleapiclient.errors import HttpError
-            from ...config.settings import get_settings
-            settings = get_settings()
             
             service = self._get_service()
             
-            # Create email message
+            # Create email message (from field will be set automatically by Gmail API)
             message = MIMEMultipart()
             message['to'] = to
-            message['from'] = settings.google_calendar_email
             message['subject'] = subject
             
             # Attach the body as plain text
@@ -162,7 +145,7 @@ class EmailTool(BaseTool):
                 message.as_bytes()
             ).decode('utf-8')
             
-            # Send the email
+            # Send the email (userId='me' means the authenticated user)
             sent_message = service.users().messages().send(
                 userId='me',
                 body={'raw': raw_message}
@@ -173,12 +156,19 @@ class EmailTool(BaseTool):
                 f"ID={sent_message.get('id')}, To='{to}', Subject='{subject}'"
             )
             
+            # Get user's profile to get the 'from' email
+            try:
+                profile = service.users().getProfile(userId='me').execute()
+                from_email = profile.get('emailAddress', 'me')
+            except:
+                from_email = 'me'
+            
             return self._success_response({
                 "message_id": sent_message.get('id'),
                 "thread_id": sent_message.get('threadId'),
                 "to": to,
                 "subject": subject,
-                "from": settings.google_calendar_email,
+                "from": from_email,
                 "labels": sent_message.get('labelIds', [])
             })
             
